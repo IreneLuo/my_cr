@@ -464,12 +464,14 @@ done:
 
 static void rx_complete (struct urb *urb)
 {
+                                 // * get skb from urb
 	struct sk_buff		*skb = (struct sk_buff *) urb->context;
 	struct skb_data		*entry = (struct skb_data *) skb->cb;
 	struct usbnet		*dev = entry->dev;
 	int			urb_status = urb->status;
 	enum skb_state		state;
 
+        // * put payload into skb, the tail of skb will move afterward
 	skb_put (skb, urb->actual_length);
 	state = rx_done;
 	entry->urb = NULL;
@@ -521,12 +523,13 @@ block:
 		// FALLTHROUGH
 
 	default:
+                // change urb status to rx_cleanup
 		state = rx_cleanup;
 		dev->net->stats.rx_errors++;
 		netif_dbg(dev, rx_err, dev->net, "rx status %d\n", urb_status);
 		break;
 	}
-
+        // move skb from rxq to donequeue
 	state = defer_bh(dev, skb, &dev->rxq, state);
 
 	if (urb) {
@@ -1151,18 +1154,18 @@ netdev_tx_t usbnet_start_xmit (struct sk_buff *skb,
 	entry->length = length;
 
 	/* create the real buffer to send */
-	entry->cr_wb = kzalloc(skb->len+3, GFP_ATOMIC);
-	
-	memset(entry->cr_wb, '@', 1);
-	memset(entry->cr_wb+1, (skb->len)>>8, 1);
-	memset(entry->cr_wb+2, (skb->len)&0x0ff, 1);
-	memcpy((entry->cr_wb)+3, (skb->data), length);
-	/* send the reconstructed buffer */
-	usb_fill_bulk_urb (urb, dev->udev, dev->out,
-			entry->cr_wb, skb->len+3, tx_complete, skb);
-	/* CR_Network Debug */
+	//entry->cr_wb = kzalloc(skb->len+3, GFP_ATOMIC);
+	//
+	//memset(entry->cr_wb, '@', 1);
+	//memset(entry->cr_wb+1, (skb->len)>>8, 1);
+	//memset(entry->cr_wb+2, (skb->len)&0x0ff, 1);
+	//memcpy((entry->cr_wb)+3, (skb->data), length);
+	///* send the reconstructed buffer */
 	//usb_fill_bulk_urb (urb, dev->udev, dev->out,
-	//		skb->data, skb->len, tx_complete, skb);
+	//		entry->cr_wb, skb->len+3, tx_complete, skb);
+	/* CR_Network Debug */
+	usb_fill_bulk_urb (urb, dev->udev, dev->out,
+			skb->data, skb->len, tx_complete, skb);
 	/* don't assume the hardware handles USB_ZERO_PACKET
 	 * NOTE:  strictly conforming cdc-ether devices should expect
 	 * the ZLP here, but ignore the one-byte packet.
@@ -1385,7 +1388,8 @@ usbnet_probe (struct usb_interface *udev, const struct usb_device_id *prod)
 	int				status;
 	const char			*name;
 	struct usb_driver 	*driver = to_usb_driver(udev->dev.driver);
-	printk("size : %u\n", sizeof(struct skb_data));
+	printk("start probing...\n");
+	printk("skb_data size : %u\n", sizeof(struct skb_data));
 	/* usbnet already took usb runtime pm, so have to enable the feature
 	 * for usb interface, otherwise usb_autopm_get_interface may return
 	 * failure if USB_SUSPEND(RUNTIME_PM) is enabled.
@@ -1404,15 +1408,15 @@ usbnet_probe (struct usb_interface *udev, const struct usb_device_id *prod)
 		dev_dbg (&udev->dev, "blacklisted by %s\n", name);
 		return -ENODEV;
 	}
-
+	/*transfer struct usb_interface to struct usb_device*/
 	xdev = interface_to_usbdev (udev);
 	interface = udev->cur_altsetting;
-
+	//bind usb with usb_device
 	usb_get_dev (xdev);
 
 	status = -ENOMEM;
 
-	// set up our own records
+	// set up our own records (network interface setting)
 	net = alloc_etherdev(sizeof(*dev));
 	if (!net) {
 		dbg ("can't kmalloc dev");
